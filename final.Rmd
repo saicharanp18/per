@@ -1,0 +1,259 @@
+---
+title: "final"
+author: "saicharan"
+date: "December 9, 2017"
+output: html_notebook
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#INTRODUCTION
+The Breast Cancer (Wisconsin) Diagnosis dataset contains the diagnosis and a set of 30 features describing the characteristics of the cell nuclei present in the digitized image of a of a fine needle aspirate (FNA) of a breast mass. Ten real-valued features are computed for each cell nucleus.
+data was downloaded from https://archive.ics.uci.edu/ml/datasets/Breast+Cancer+Wisconsin+%28Diagnostic%29 .
+The mean, standard error (SE) and worst or largest (mean of the three largest values) of these features were computed for each image, resulting in 30 features.
+
+
+```{r}
+library(psych)
+library(pheatmap)
+library("DMwR")
+library("class")
+library("gmodels")
+library(caret)
+library(e1071)
+library(kernlab)
+library("ROCR")
+library(ggplot2)
+library(neuralnet)
+#load dataset.
+cancerdata <- read.csv("wdbc.data.txt", sep = ",", header = F)
+# drop first ID column in the dataset.
+cancerdata <- cancerdata[,-1]
+# assign column names to a vector.
+columnnames <- c("diagnosis","radius_mean","texture_mean","perimeter_mean","area_mean","smoothness_mean","compactness_mean","concavity_mean","concave_points_mean","symmetry_mean","fractal_dimension_mean","radius_se","texture_se","perimeter_se","area_se","smoothness_se","compactness_se","concavity_se","concavepoints_se","symmetry_se","fractal_dimension_se","radius_worst","texture_worst","perimeter_worst","area_worst","smoothness_worst","compactness_worst","concavity_worst","concave_points_worst","symmetry_worst","fractal_dimension_worst")
+# assign column names to dataset.
+colnames(cancerdata) <- columnnames
+summary(cancerdata)
+table(cancerdata$diagnosis)
+# converting the diagnosis column of dataset in to factors.
+cancerdata$diagnosis <- factor(cancerdata$diagnosis, levels = c("B","M"))
+```
+#Exploratory analysis
+PCA : The two first components PC1 and PC2 explains the 0.6324 of the variance. we need 10 Principal components to explan for 0.95 of variance.
+if we look at the plot of principal component analysis we can clearly see they are well partitioned.
+
+Correlation using heatmap: if we observe heatmap the datset shows high correlation between variables. but to further analyse we can select variables
+with high correlation in the heat map and view using pairs.panels.
+```{r, echo=TRUE}
+
+#PCA
+comp <- prcomp(cancerdata[,2:31], center = TRUE, scale = TRUE)
+summary(comp)
+#plot(comp, type="l")
+xdf <- as.data.frame(comp$x)
+ggplot(xdf, aes(x=PC1, y=PC2, col=cancerdata$diagnosis)) + geom_point(alpha=0.5)
+# correlation using heatmap.
+cor <- cor(cancerdata[,2:31])
+pheatmap(cor)
+# examine correlation between radius_worst and perimeter_mean
+pairs.panels(cancerdata[,c(4,22)])
+#correlation is almost high for the entire dataset
+
+
+```
+# outliers.
+outliers can be determined by DMwR package for continous variables.
+```{r}
+#install.packages("DMwR")
+out <- lofactor(cancerdata[,2:31], k=38) 
+plot(density(out))
+out1 <- order(out, decreasing = T)[1:5]
+print(out1)
+```
+# Building a KNN Model
+```{r}
+# wiring a function for min max normalisation.
+normalize <- function(x){
+  return((x - min(x)) / (max(x) - min(x)))
+}
+# normalize the data using normalize function.
+cancerdata_norm <- as.data.frame(lapply(cancerdata[2:ncol(cancerdata)], normalize))
+set.seed(12345)
+
+index <- createDataPartition(cancerdata$diagnosis,p=0.75,list=F)
+
+# create training and testing datasets.
+knn_train <- cancerdata_norm[index,]
+knn_test <- cancerdata_norm[-index,]
+# get labels for both test and traain data sets.
+knn_train_labels <- cancerdata[index, 1]
+knn_test_labels <- cancerdata[-index,1]
+
+
+# predict outcomes of test using knn and training datasets.
+# here k value is sqrt of number of observations.
+knn_pred <- knn(train = knn_train, test = knn_test, cl = knn_train_labels, k=24)
+# create confusion matrix and crosstables to see accuracy of model.
+CrossTable(x = knn_test_labels, y = knn_pred,prop.chisq=FALSE)
+
+confusionMatrix(knn_pred,knn_test_labels)
+#set.seed(1234)
+#m <- train(diagnosis ~., data = crossknn_train, method ="knn", #k=23)
+#kpred <- predict(knnFit1, crossknn_test )
+#kagre <- kpred == crossknn_test$diagnosis
+#table(kagre)
+#prop.table(table(kagre))
+
+# 10 fold cross validation.
+can <- cancerdata
+can[,2:31] <- as.data.frame(lapply(cancerdata[2:ncol(cancerdata)], normalize))
+crossknn_train <- can[index,]
+crossknn_test <- can[-index,]
+cntrl <- trainControl(method="repeatedcv", number=10, repeats=3)
+knnFit1 <- train(diagnosis ~., data = crossknn_train, method ="knn",trControl=cntrl, metric="Accuracy", tuneLength=20,preProc=c("range"))
+knnFit1
+# accuracy of new model.
+crosspred <- predict(knnFit1, crossknn_test)
+confusionMatrix(crosspred, knn_test_labels)
+
+
+```
+
+# Glm
+```{r, message=FALSE, warning=FALSE}
+
+glmdata <- cancerdata
+glmdata$diagnosis <- factor(glmdata$diagnosis,levels = c("B","M"), labels = c("0","1"))
+# create training and testing dataset.
+glm_train <- glmdata[index,]
+glm_test <- glmdata[-index,]
+# build a binomial logistic regression model.
+lmmodel <- glm(formula = diagnosis ~., family = binomial, data = glm_train)
+summary(lmmodel)
+# predict outcomes of test data.
+log.pred <- predict(lmmodel, newdata = subset(glm_test), type = 'response')
+
+log.pred <- ifelse(log.pred > 0.5,1,0)
+# calculating percentage accuracy
+misclassification <- mean(log.pred != glm_test$diagnosis)
+# classification accuracy will be 
+print(paste('Accuracy', 1- misclassification))
+
+
+step(lmmodel)
+
+lm2 <- glm(formula = diagnosis ~ radius_mean + texture_mean + compactness_mean + concave_points_mean +symmetry_mean + area_se + symmetry_se + radius_worst +texture_worst + area_worst + concavity_worst + symmetry_worst, family = binomial, data = glm_train)
+log.pred2 <- predict(lm2, newdata = subset(glm_test), type = 'response')
+
+log.pred2 <- ifelse(log.pred2 > 0.5,1,0)
+# calculating percentage accuracy
+misclassification2 <- mean(log.pred2 != glm_test$diagnosis)
+# classification accuracy will be 
+print(paste('Accuracy', 1- misclassification2))
+```
+
+# ann
+
+```{r}
+# 
+anndata <- can
+anndata$diagnosis <- factor(anndata$diagnosis, levels = c("B","M"), labels = c("0","1"))
+# convert diagnosis column to numeric.
+anndata$diagnosis <- as.numeric(anndata$diagnosis)
+# create training and testing datasets.
+ann_train <- anndata[index,]
+ann_test <- anndata[-index,]
+str(ann_test)
+# write a formula for Ann.
+col_list <- paste(c(colnames(ann_train[,-c(1)])), collapse = "+")
+col_list <- paste(c("diagnosis~",col_list), collapse = "")
+f <- formula(col_list)
+# Build Ann model.
+ann_model <- neuralnet(f, data = ann_train)
+plot(ann_model)
+ann_result <- compute(ann_model, ann_test[,2:31])
+# predict outcomes for test dataset.
+predicted_strength <- ann_result$net.result
+# calculating ercentage accuracy.
+cor(predicted_strength, ann_test$diagnosis)
+
+#Improving model performance
+# improve Ann model with backpropagation.
+ann_model2 <- neuralnet(f, data = ann_train, hidden = 5)
+plot(ann_model2)
+# compute outcome for test data.
+ann_result2 <- compute(ann_model2, ann_test[,2:31])
+predicted_strength2 <- ann_result2$net.result
+# calculating percentage accuracy.
+cor(predicted_strength2, ann_test$diagnosis)
+```
+#SVM
+
+```{r}
+svmdata <- cancerdata
+svm_train <- svmdata[index,]
+svm_test <- svmdata[-index,]
+
+svmmodel <- ksvm(diagnosis~., data = svm_train, kernel = "vanilladot")
+summary(svmmodel)
+svmmodel
+svmpred <- predict(svmmodel, svm_test[,2:31])
+ag <- svmpred == svm_test$diagnosis
+prop.table(table(ag))
+
+
+svmmodel2 <- ksvm(diagnosis~., data = svm_train, kernel = "rbfdot")
+svmpred2 <- predict(svmmodel2, svm_test[,2:31])
+ag2 <- svmpred2 == svm_test$diagnosis
+prop.table(table(ag2))
+
+#sauc <-  prediction(as.numeric(svmpred), as.numeric(svm_test$diagnosis))
+#sperf <- performance(sauc, measure = "tpr", x.measure = "fpr")
+#plot(sperf, col = 'blue',lwd = 3)
+
+
+# 10 fold cross validation using caret package.
+cntrl <- trainControl(method="repeatedcv", number=10, repeats=3)
+svmFit1 <- train(diagnosis ~., data = svm_train, method = "svmLinear",trControl=cntrl)
+svmFit1
+
+fpred <- predict(svmFit1, svm_test)
+ag3 <- fpred == svm_test$diagnosis
+table(ag3)
+prop.table(table(ag3))
+
+```
+
+
+```{r}
+#bagging with svm
+bagctrl <- bagControl(fit = svmBag$fit,predict = svmBag$pred,aggregate = svmBag$aggregate)
+svmbag <- train(diagnosis ~ ., data = svm_train,trControl = cntrl, bagControl = bagctrl)
+svmbag
+# accuracy of svm is 96.24%
+```
+
+#Model comparision.
+
+Knn with K= 23 accuracy is 95.77%
+knn with crossvalidation model is 95.77%
+glm  model accuracy is 91.5.07%
+glm model backfitted using step() is 92.95.88%
+ann model accuracy is 93.03.21 %
+ann model after tuning is 93.90 %
+svm model accuracy with vanilladot is 99.29%
+svm model accuracy with rbfdor is 98.59%
+svm model accuracy with 10fold cross validation is 99.29%
+
+all models have comparitively worked well with this dataset.
+
+knn models didnot show any significant improvement with tuning.
+whereas glm performed well after tuning.
+ann models accuracy has increased after tuning.
+svm model performance has improved with crossvalidation.
+
+#
+absolute accuracy of Knn model is (0.9103022, 0.9843382) at 95% CI
+absolute accuracy of knn modlel after crossvalidation is (0.9103022, 0.9843382) at 95% confidence interval.

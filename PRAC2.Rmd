@@ -1,0 +1,225 @@
+---
+title: "prac2"
+author: "saicharan"
+date: "November 1, 2017"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# PROBLEM 1
+
+```{r}
+data.adult <- read.csv("adult.data.txt", header = FALSE)
+colnames(data.adult)<-c("age", "workclass", "fnlwgt", "education", "education_num", "marital_status", "occupation", "relationship", "race", "sex", "capital_gain", "capital_loss", "hours_per_week", "native_country", "income" )
+# replace ? in the dataset with NA.
+data.adult[data.adult == " ?"] <- NA
+data.adult <- na.omit(data.adult)
+summary(data.adult)
+T1 <- table(data.adult$income, data.adult$workclass)
+
+
+```
+
+#PROBLEM2
+```{r}
+#install.packages("xlsx")
+library(xlsx)
+# load dataset
+data2 <- read.xlsx("uffidata.xlsx", 1)
+data2 = data2[1:99,]
+#2.1
+cat("Yes, there are outliers in the dataset. appropriate action would be to drop the outliers from the dataset. so that they would not interfere with the regression model.")
+##
+#
+cat("outliers can be discovered by measuring varibility using  interquantile range. other method would be calculating Zscore values for each observation. any zscore value greater than 3 or less than -3 are considered to be outliers.")
+summary(data2)
+#2.2
+#histograms.
+hist(data2$Sale.Price)
+# data is right skewed. and we can see some values which not with in the curve. which would be potentially outliers in the data.
+#hist(data2$Lot.Area)
+# examining the colinearities using pairs.panles function.
+library(psych)
+# sale price is colinear with living area, lot area and they exhibit positive colinearity.
+# sale price shows colineearity to some extent with Basement_Fin_SF.
+pairs.panels(data2)
+
+
+# outliers for sale price.
+# calculate zscores for the observations.
+sale.z <- abs((mean(data2$Sale.Price) - data2$Sale.Price)/sd(data2$Sale.Price))
+# get the row numbers with zscores greater than 3.
+out.sale <- which(sale.z > 3)
+# outliers for sale price.
+out.sale
+
+# outliers for lotarea using zscores.
+lot.z <- abs((mean(data2$Lot.Area) - data2$Lot.Area)/sd(data2$Lot.Area))
+out.lot <- which(lot.z > 3)
+out.lot
+
+# outliers for living area using zscores.
+live.z <- abs((mean(data2$Living.Area_SF ) - data2$Living.Area_SF)/sd(data2$Living.Area_SF))
+out.live <- which(live.z > 3)
+out.live
+
+#2.3
+#No. UFFI alone is not enough to predict the value of a property.
+
+#2.4
+#Yes, UFFI is a significant predictor when we use it with other variables.
+
+# 2.5
+# i decided to drop 97,98,99 as outliers as 98,99 are both common outliers in saleprice and living area.
+# i decided to drop 97 because its z.score valus is 5.51 which way greater than any other observation.
+# remove rows 97 to 99 in the dataset.
+f.data2 <- data2[-c(97:99),]
+#remove first two columns observation and year sold.
+f.data2 <- f.data2[,3:12]
+# build a multiple regression model.
+# the significant variables for the model using pvalues are UFFIN, Lot.Area, ENC.PK.space, living area
+#adjusted rsquared value is 0.6065
+p2.fit1 <- lm(Sale.Price ~.,data = f.data2)
+summary(p2.fit1)
+#step(p2.fit1)
+# eliminating the variable using backfitting.
+# the new model has slightly increased adjusted Rsquared value 0.614 which indicates model performance has improved than the model before.
+# all the p values are less than 0.05 and prove they are good predictors.
+p2.fit2 <- lm(Sale.Price ~ UFFI.IN+Brick.Ext+Bsmnt.Fin_SF+Lot.Area+Enc.Pk.Spaces+Living.Area_SF, data = f.data2 ) 
+summary(p2.fit2)
+
+
+predict.data <- p2.fit2$fitted.values
+# actual G3 values.
+saleprice <- f.data2[,1]
+# calculate square root error.
+sqerr <- (saleprice - predict.data)^2
+# Root mean squared error.
+rmse <- sqrt(mean(sqerr))
+
+cat("RMSE for the model is:", rmse)
+# RMSE of the final model is 16913 
+
+#2.6
+# on an average the estimated price for the property decrease by 14908.8 if UFFI is present. this can be found by examining the estimates in model summary.
+
+#2.7
+# creating dataframe for testcases.
+a.uffi <- c("1","0","5000","1","2","1700","1","0","1")
+a.uffi <- as.numeric(a.uffi)
+a.nouffi <- c("1","0","5000","1","2","1700","1","0","0")
+a.nouffi <- as.numeric(a.nouffi)
+colname <- c("X45.Yrs","Bsmnt.Fin_SF","Lot.Area","Brick.Ext","Enc.Pk.Spaces","Living.Area_SF","Central.Air","Pool","UFFI.IN")
+# convert vector in to a dataframe.
+# testcase with UFFI.
+testcase <- rbind.data.frame(a.uffi)
+# testcase without noUFFI.
+testcase2 <- rbind.data.frame(a.nouffi)
+# assign colnames to the datafrme.
+colnames(testcase2) <- colname
+colnames(testcase) <- colname
+# predict estimates for the testcases.
+# with UFFI
+pred1 <- predict(p2.fit2, testcase)
+cat("prediction for house with UFFI is ", pred1)
+#Without UFFI
+
+pred2 <- predict(p2.fit2, testcase2)
+cat ("prediction for house without UFFI is ", pred2)
+
+# 95% Confidence Interval.
+# F+/- 1.96*SE.
+summary(p2.fit2)
+# SE of the model is 17570.
+# with UFFI
+pred1.up <- pred1 + 1.96 * 17570
+pred1.down <- pred1 - 1.96*17570
+cat ("95% confidence interval of estimate with UFFI is between: ", pred1.down,"and",pred1.up)
+
+# with no UFFI.
+
+pred2.up <- pred2 + 1.96 * 17570
+pred2.down <- pred2 - 1.96*17570
+cat ("95% confidence interval of estimate without UFFI is between: ", pred2.down,"and",pred2.up)
+
+#2.8.
+# if the client paid $215,000. then client would endup overpaying for the house with UFFI 
+# for house with UFFI
+#As we have calculated the estimate for house with UFFI as $171527. client would endup paying $43472 extra for the house.
+#as we have estimated maximum price as $205964 using 95% CI. justified compensation dueto overpayment would be $9036 (maxprice estimated - price paid by client) .
+
+
+
+
+```
+
+#PROBLEM 3
+
+```{r}
+# load dataset
+prob3 <- read.csv("titanic_data.csv", header = T, stringsAsFactors = FALSE)
+data3 <- prob3[c(2,3,5,6,7,8,12)]
+#convert data in to factors.
+data3$Survived <- as.factor(data3$Survived)
+data3$Pclass <- as.factor(data3$Pclass)
+data3$Parch <- as.factor(data3$Parch)
+data3$Embarked <- as.factor(data3$Embarked)
+data3$Sex <- factor(prob3$Sex, labels = c('0','1'))
+# impute missing values.
+# i decided to impute missing age values with mean age. as there are nearly 170 NA we cannot drop that  many observations.
+avgage <- mean(prob3$Age, na.rm = T)
+data3$Age[is.na(data3$Age)] = avgage
+# drop rows with embarked values as NA.
+data3 = data3[!is.na(data3$Embarked),]
+summary(data3)
+library(caret)
+#2.1
+# data partioining.
+# i decided to partion data in 75 to 25 ratio using survived variable.
+# i think data will be well partioned with proportional number of cases in both datasets, based on survival variable.
+set.seed(500)
+index <- createDataPartition(y = data3$Survived, p = 0.75, list = FALSE)
+prob3.train <- data3[index,1:ncol(data3)]
+prob3.test <- data3[-index, 1:ncol(data3)]
+
+#2.2
+# Builg logistic regression model.
+fit <- glm(Survived ~., family = binomial(link = "logit"), data = prob3.train)
+summary(fit)
+# backfitting the model using p values and eliminating variables with 
+fit2 <- glm(Survived ~ Pclass+Sex+Age+SibSp,family = binomial(link = "logit"), data = prob3.train)
+summary(fit2)
+#2.3
+# Regression equation.
+#P = 1/(1 + e^-(4.02923749-0.985(PClass2)-2.217(Pclass3)-2.74(Sex1)- 0.0425(age)-0.3887(sibSp))) 
+
+#2.4
+# predict outcome for test dataset
+pred <- predict(fit2, newdata = subset(prob3.test), type='response')
+pred <- ifelse(pred > 0.5,1,0)
+# calculating mean of misclassified observations.
+misclassification <- mean(pred != prob3.test$Survived)
+# classification accuracy  
+print(paste('Accuracy', ((1- misclassification)*100)))
+
+```
+
+#PROBLEM 4
+KNN
+it can be used to estimate both qualitative attributes and quantitative attributes.
+for qualitative attributes knn imputes by the most frequent value among k nearest neighbors.
+for quantitative attributes knn imputes by the mean of k nearest neighbors. 
+efficiency of Knn is biggest problem,if dataset is large and selection of k value which greatly impact the measures. .
+
+
+
+Naive Bayes
+
+it is a iterative and repeating process.
+NB is used to predict the most probable value for each missing value, given the evidence provided by the observed instances of each class.
+for implementing NB for data imputaion, we can seperate the instances according to their corresponding classes. istances without any missing values are employed as training dataset for NB classifier. which can be use for imputation.
+
+
